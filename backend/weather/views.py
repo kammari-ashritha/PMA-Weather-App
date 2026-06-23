@@ -9,6 +9,8 @@ from django.http import HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .db import get_collection
+from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
 
 OWM_BASE = 'https://api.openweathermap.org/data/2.5'
 
@@ -165,17 +167,17 @@ def search_detail(request, search_id):
         return Response({'message': 'Deleted successfully'}, status=200)
 
 
-@api_view(['GET'])
+
+@csrf_exempt
 def export_data(request):
     """
-    GET /api/export/?format=json  - Export all searches as JSON
-    GET /api/export/?format=csv   - Export all searches as CSV
+    GET /api/export/?format=json
+    GET /api/export/?format=csv
     """
     fmt = request.GET.get('format', 'json').lower()
     col = get_collection('searches')
     searches = list(col.find().sort('created_at', -1))
 
-    # Prepare flat data for export
     flat_data = []
     for s in searches:
         s['_id'] = str(s['_id'])
@@ -194,22 +196,24 @@ def export_data(request):
 
     if fmt == 'json':
         content = json.dumps(flat_data, indent=2, default=str)
-        return HttpResponse(
-            content,
-            content_type='application/json',
-            headers={'Content-Disposition': 'attachment; filename="weather-searches.json"'}
-        )
+        response = HttpResponse(content, content_type='application/json')
+        response['Content-Disposition'] = 'attachment; filename="weather-searches.json"'
+        return response
 
     elif fmt == 'csv':
-        output = io.StringIO()
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="weather-searches.csv"'
         if flat_data:
-            writer = csv.DictWriter(output, fieldnames=flat_data[0].keys())
+            writer = csv.DictWriter(response, fieldnames=flat_data[0].keys())
             writer.writeheader()
             writer.writerows(flat_data)
-        return HttpResponse(
-            output.getvalue(),
-            content_type='text/csv',
-            headers={'Content-Disposition': 'attachment; filename="weather-searches.csv"'}
-        )
-    else:
-        return Response({'error': 'Unsupported format. Use json or csv.'}, status=400)
+        else:
+            response.write("id,location,date_range_start,date_range_end,temperature_c,condition,humidity_pct,wind_speed_ms,country,saved_at\n")
+            response.write("No data available")
+        return response
+
+    return HttpResponse(
+        json.dumps({'error': 'Unsupported format. Use json or csv.'}),
+        content_type='application/json',
+        status=400
+    )
