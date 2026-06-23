@@ -1,5 +1,5 @@
 from django.urls import path, include
 
 urlpatterns = [
-    path('api/', include('weather.urls')),
+    path('https://pma-weather-app-kg8k.onrender.com/api/', include('weather.urls')),
 ]
