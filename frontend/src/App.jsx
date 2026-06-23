@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import './App.css'
 
-const API_BASE = '/api'
+const API_BASE = 'https://pma-weather-app-kg8k.onrender.com/api'
 
 const getWeatherEmoji = (main) => {
   const map = {
