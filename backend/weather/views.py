@@ -6,20 +6,74 @@ from datetime import datetime
 from bson import ObjectId
 from django.conf import settings
 from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from .db import get_collection
-from django.views.decorators.http import require_GET
-from django.views.decorators.csrf import csrf_exempt
 
 OWM_BASE = 'https://api.openweathermap.org/data/2.5'
 
 
+# ── HELPER: Get user from request header ──────────────────────────────────────
+
+def get_user_id(request):
+    """Extract user_id from X-User-Id header"""
+    return request.META.get('HTTP_X_USER_ID', None)
+
+
+# ── AUTH ──────────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+def google_auth(request):
+    """
+    POST /api/auth/google/
+    Body: { "credential": "<google_id_token>" }
+    Returns: { "user_id", "email", "name", "picture" }
+    """
+    credential = request.data.get('credential')
+    if not credential:
+        return Response({'error': 'No credential provided'}, status=400)
+
+    try:
+        client_id = settings.GOOGLE_CLIENT_ID
+        id_info = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            client_id,
+            clock_skew_in_seconds=10
+        )
+
+        user_data = {
+            'user_id': id_info['sub'],
+            'email': id_info['email'],
+            'name': id_info.get('name', ''),
+            'picture': id_info.get('picture', ''),
+        }
+
+        # Save or update user in MongoDB
+        users_col = get_collection('users')
+        users_col.update_one(
+            {'user_id': id_info['sub']},
+            {'$set': {**user_data, 'last_login': datetime.utcnow().isoformat()}},
+            upsert=True
+        )
+
+        return Response(user_data)
+
+    except ValueError as e:
+        return Response({'error': f'Invalid token: {str(e)}'}, status=401)
+    except Exception as e:
+        return Response({'error': f'Auth failed: {str(e)}'}, status=500)
+
+
+# ── WEATHER ───────────────────────────────────────────────────────────────────
+
 def fetch_from_owm(endpoint, location=None, lat=None, lon=None):
-    """Fetch data from OpenWeatherMap API"""
     api_key = settings.OPENWEATHER_API_KEY
     if not api_key:
-        raise ValueError('OpenWeatherMap API key not set in .env file')
+        raise ValueError('OpenWeatherMap API key not configured')
 
     params = {'appid': api_key, 'units': 'metric'}
     if lat and lon:
@@ -28,7 +82,7 @@ def fetch_from_owm(endpoint, location=None, lat=None, lon=None):
     elif location:
         params['q'] = location
     else:
-        raise ValueError('Provide either location name or lat/lon coordinates')
+        raise ValueError('Provide location or coordinates')
 
     res = requests.get(f'{OWM_BASE}/{endpoint}', params=params, timeout=10)
     res.raise_for_status()
@@ -37,7 +91,6 @@ def fetch_from_owm(endpoint, location=None, lat=None, lon=None):
 
 @api_view(['GET'])
 def current_weather(request):
-    """GET /api/weather/current/?location=London OR ?lat=51.5&lon=-0.1"""
     location = request.GET.get('location')
     lat = request.GET.get('lat')
     lon = request.GET.get('lon')
@@ -49,17 +102,16 @@ def current_weather(request):
         if code == 404:
             return Response({'error': 'City not found. Check spelling and try again.'}, status=404)
         if code == 401:
-            return Response({'error': 'Invalid API key. Check your .env file.'}, status=401)
-        return Response({'error': 'Weather service unavailable. Try again later.'}, status=503)
+            return Response({'error': 'Invalid API key.'}, status=401)
+        return Response({'error': 'Weather service unavailable.'}, status=503)
     except ValueError as e:
         return Response({'error': str(e)}, status=400)
     except Exception as e:
-        return Response({'error': f'Unexpected error: {str(e)}'}, status=500)
+        return Response({'error': str(e)}, status=500)
 
 
 @api_view(['GET'])
 def forecast_weather(request):
-    """GET /api/weather/forecast/?location=London"""
     location = request.GET.get('location')
     lat = request.GET.get('lat')
     lon = request.GET.get('lon')
@@ -69,24 +121,25 @@ def forecast_weather(request):
     except requests.HTTPError as e:
         code = e.response.status_code
         if code == 404:
-            return Response({'error': 'City not found for forecast.'}, status=404)
-        return Response({'error': 'Forecast service unavailable.'}, status=503)
+            return Response({'error': 'City not found.'}, status=404)
+        return Response({'error': 'Forecast unavailable.'}, status=503)
     except ValueError as e:
         return Response({'error': str(e)}, status=400)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
 
+# ── SEARCHES (CRUD) ───────────────────────────────────────────────────────────
+
 @api_view(['GET', 'POST'])
 def searches_list(request):
-    """
-    GET  /api/searches/ - READ all saved searches
-    POST /api/searches/ - CREATE a new saved search
-    """
     col = get_collection('searches')
+    user_id = get_user_id(request)
 
     if request.method == 'GET':
-        searches = list(col.find().sort('created_at', -1))
+        # Filter by user if logged in, else return empty
+        query = {'user_id': user_id} if user_id else {'user_id': 'anonymous'}
+        searches = list(col.find(query).sort('created_at', -1))
         for s in searches:
             s['_id'] = str(s['_id'])
         return Response(searches)
@@ -97,20 +150,20 @@ def searches_list(request):
         date_start = data.get('date_range_start', '')
         date_end = data.get('date_range_end', '')
 
-        # Validate inputs
         if not location:
             return Response({'error': 'Location is required'}, status=400)
         if not date_start or not date_end:
-            return Response({'error': 'Both start and end dates are required'}, status=400)
+            return Response({'error': 'Both dates are required'}, status=400)
         try:
             start = datetime.strptime(date_start, '%Y-%m-%d')
             end = datetime.strptime(date_end, '%Y-%m-%d')
             if end < start:
-                return Response({'error': 'End date must be after or equal to start date'}, status=400)
+                return Response({'error': 'End date must be after start date'}, status=400)
         except ValueError:
-            return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+            return Response({'error': 'Invalid date format'}, status=400)
 
         doc = {
+            'user_id': user_id or 'anonymous',
             'location': location,
             'date_range_start': date_start,
             'date_range_end': date_end,
@@ -125,15 +178,13 @@ def searches_list(request):
 
 @api_view(['PUT', 'DELETE'])
 def search_detail(request, search_id):
-    """
-    PUT    /api/searches/<id>/ - UPDATE a saved search
-    DELETE /api/searches/<id>/ - DELETE a saved search
-    """
     col = get_collection('searches')
+    user_id = get_user_id(request)
+
     try:
         obj_id = ObjectId(search_id)
     except Exception:
-        return Response({'error': 'Invalid search ID format'}, status=400)
+        return Response({'error': 'Invalid ID'}, status=400)
 
     if request.method == 'PUT':
         update_fields = {}
@@ -148,35 +199,44 @@ def search_detail(request, search_id):
             update_fields['date_range_end'] = request.data['date_range_end']
 
         if not update_fields:
-            return Response({'error': 'No fields to update'}, status=400)
+            return Response({'error': 'Nothing to update'}, status=400)
 
         update_fields['updated_at'] = datetime.utcnow().isoformat()
-        result = col.update_one({'_id': obj_id}, {'$set': update_fields})
 
+        # Only update if belongs to this user
+        query = {'_id': obj_id}
+        if user_id:
+            query['user_id'] = user_id
+
+        result = col.update_one(query, {'$set': update_fields})
         if result.matched_count == 0:
-            return Response({'error': 'Search record not found'}, status=404)
+            return Response({'error': 'Record not found'}, status=404)
 
         updated = col.find_one({'_id': obj_id})
         updated['_id'] = str(updated['_id'])
         return Response(updated)
 
     if request.method == 'DELETE':
-        result = col.delete_one({'_id': obj_id})
+        query = {'_id': obj_id}
+        if user_id:
+            query['user_id'] = user_id
+
+        result = col.delete_one(query)
         if result.deleted_count == 0:
-            return Response({'error': 'Search record not found'}, status=404)
-        return Response({'message': 'Deleted successfully'}, status=200)
+            return Response({'error': 'Record not found'}, status=404)
+        return Response({'message': 'Deleted'}, status=200)
 
 
+# ── EXPORT ────────────────────────────────────────────────────────────────────
 
 @csrf_exempt
 def export_data(request):
-    """
-    GET /api/export/?format=json
-    GET /api/export/?format=csv
-    """
     fmt = request.GET.get('format', 'json').lower()
+    user_id = request.META.get('HTTP_X_USER_ID', None)
     col = get_collection('searches')
-    searches = list(col.find().sort('created_at', -1))
+
+    query = {'user_id': user_id} if user_id else {}
+    searches = list(col.find(query).sort('created_at', -1))
 
     flat_data = []
     for s in searches:
@@ -208,12 +268,11 @@ def export_data(request):
             writer.writeheader()
             writer.writerows(flat_data)
         else:
-            response.write("id,location,date_range_start,date_range_end,temperature_c,condition,humidity_pct,wind_speed_ms,country,saved_at\n")
-            response.write("No data available")
+            response.write("No data\n")
         return response
 
     return HttpResponse(
-        json.dumps({'error': 'Unsupported format. Use json or csv.'}),
+        json.dumps({'error': 'Use json or csv'}),
         content_type='application/json',
         status=400
     )

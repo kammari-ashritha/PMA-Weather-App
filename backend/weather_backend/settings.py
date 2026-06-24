@@ -40,3 +40,4 @@ MONGODB_DB = os.getenv('MONGODB_DB', 'weather_app')
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')

@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('auth/google/', views.google_auth, name='google-auth'),
     path('weather/current/', views.current_weather, name='current-weather'),
     path('weather/forecast/', views.forecast_weather, name='forecast-weather'),
     path('searches/', views.searches_list, name='searches-list'),

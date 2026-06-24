@@ -237,3 +237,71 @@ body {
   .forecast-grid { grid-template-columns: repeat(2, 1fr); }
   .header-inner { flex-direction: column; gap: 10px; text-align: center; }
 }
+/* LOGIN PAGE */
+.login-page {
+  min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; position: relative; overflow: hidden;
+  background: var(--bg);
+}
+
+.login-card {
+  position: relative; z-index: 1;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 28px; padding: 3rem 2.5rem;
+  text-align: center; max-width: 420px; width: 90%;
+  backdrop-filter: blur(30px);
+}
+
+.login-sub { font-size: 12px; color: var(--subtext); margin-top: 4px; margin-bottom: 1.5rem; }
+
+.login-divider {
+  height: 1px; background: var(--card-border);
+  margin: 1.5rem 0;
+}
+
+.login-title {
+  font-family: 'Space Grotesk'; font-size: 1.4rem;
+  font-weight: 600; margin-bottom: 10px;
+}
+
+.login-desc {
+  font-size: 14px; color: var(--subtext); line-height: 1.6; margin-bottom: 2rem;
+}
+
+.google-btn-wrap {
+  display: flex; justify-content: center; margin-bottom: 1.5rem;
+}
+
+.login-note { font-size: 11px; color: var(--subtext); }
+
+/* USER INFO IN HEADER */
+.user-info {
+  display: flex; align-items: center; gap: 12px;
+}
+
+.user-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 2px solid var(--purple);
+}
+
+.user-details {
+  display: flex; flex-direction: column; gap: 1px;
+}
+
+.user-name { font-size: 13px; font-weight: 600; }
+.user-email { font-size: 11px; color: var(--subtext); }
+
+.logout-btn {
+  padding: 8px 16px;
+  background: rgba(255,79,106,0.15);
+  border: 1px solid rgba(255,79,106,0.3);
+  border-radius: 20px; color: var(--coral);
+  font-family: 'DM Sans'; font-size: 12px;
+  font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  background: rgba(255,79,106,0.25);
+  border-color: var(--coral);
+}

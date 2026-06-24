@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import { googleLogout } from '@react-oauth/google'
+import Login from './components/Login.jsx'
 import './App.css'
 
 const API_BASE = 'https://pma-weather-app-kg8k.onrender.com/api'
@@ -22,12 +24,15 @@ const getWeatherGradient = (main) => {
     'Thunderstorm': 'linear-gradient(135deg, #4A148C, #880E4F, #B71C1C)',
     'Snow': 'linear-gradient(135deg, #90CAF9, #64B5F6, #BBDEFB)',
     'Mist': 'linear-gradient(135deg, #546E7A, #607D8B, #78909C)',
-    'Fog': 'linear-gradient(135deg, #546E7A, #607D8B, #78909C)',
   }
-  return map[main] || 'linear-gradient(135deg, #7B2FFF, #FF2D55, #FF6B35)'
+  return map[main] || 'linear-gradient(135deg, #7B2FFF, #FF2D55)'
 }
 
 export default function App() {
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('aurora_user')
+    return saved ? JSON.parse(saved) : null
+  })
   const [location, setLocation] = useState('')
   const [weather, setWeather] = useState(null)
   const [forecast, setForecast] = useState([])
@@ -38,11 +43,40 @@ export default function App() {
   const [editingId, setEditingId] = useState(null)
   const [editLocation, setEditLocation] = useState('')
 
-  useEffect(() => { fetchHistory() }, [])
+  // Axios config with user header
+  const apiConfig = () => ({
+    headers: user ? { 'X-User-Id': user.user_id } : {}
+  })
+
+  useEffect(() => {
+    if (user) fetchHistory()
+  }, [user])
+
+  const handleLogin = async (credentialResponse) => {
+    try {
+      const res = await axios.post(`${API_BASE}/auth/google/`, {
+        credential: credentialResponse.credential
+      })
+      const userData = res.data
+      setUser(userData)
+      localStorage.setItem('aurora_user', JSON.stringify(userData))
+    } catch (e) {
+      setError('Login failed. Please try again.')
+    }
+  }
+
+  const handleLogout = () => {
+    googleLogout()
+    setUser(null)
+    localStorage.removeItem('aurora_user')
+    setWeather(null)
+    setForecast([])
+    setHistory([])
+  }
 
   const fetchHistory = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/searches/`)
+      const res = await axios.get(`${API_BASE}/searches/`, apiConfig())
       setHistory(res.data)
     } catch (e) { console.error('History fetch failed', e) }
   }
@@ -62,12 +96,12 @@ export default function App() {
       setWeather(wRes.data)
       setForecast(fRes.data.list || [])
     } catch (e) {
-      setError(e.response?.data?.error || 'Location not found. Please check the spelling and try again.')
+      setError(e.response?.data?.error || 'Location not found. Try again.')
     } finally { setLoading(false) }
   }
 
   const detectLocation = () => {
-    if (!navigator.geolocation) return setError('Geolocation not supported by your browser')
+    if (!navigator.geolocation) return setError('Geolocation not supported')
     setLoading(true)
     setError('')
     navigator.geolocation.getCurrentPosition(
@@ -81,16 +115,16 @@ export default function App() {
           setForecast(fRes.data.list || [])
           setLocation(wRes.data.name)
         } catch (e) {
-          setError('Could not get weather for your location')
+          setError('Could not get your location weather')
         } finally { setLoading(false) }
       },
-      () => { setError('Location access denied. Please allow location access.'); setLoading(false) }
+      () => { setError('Location access denied'); setLoading(false) }
     )
   }
 
   const saveSearch = async () => {
     if (!weather) return setError('Search for a location first')
-    if (!dateRange.start || !dateRange.end) return setError('Please select both start and end dates')
+    if (!dateRange.start || !dateRange.end) return setError('Select both dates')
     if (dateRange.end < dateRange.start) return setError('End date must be after start date')
     try {
       await axios.post(`${API_BASE}/searches/`, {
@@ -98,18 +132,18 @@ export default function App() {
         date_range_start: dateRange.start,
         date_range_end: dateRange.end,
         weather_data: weather
-      })
+      }, apiConfig())
       setDateRange({ start: '', end: '' })
       fetchHistory()
     } catch (e) {
-      setError(e.response?.data?.error || 'Failed to save search')
+      setError(e.response?.data?.error || 'Failed to save')
     }
   }
 
   const deleteSearch = async (id) => {
-    if (!confirm('Delete this saved search?')) return
+    if (!confirm('Delete this search?')) return
     try {
-      await axios.delete(`${API_BASE}/searches/${id}/`)
+      await axios.delete(`${API_BASE}/searches/${id}/`, apiConfig())
       fetchHistory()
     } catch (e) { setError('Failed to delete') }
   }
@@ -117,7 +151,7 @@ export default function App() {
   const saveEdit = async (id) => {
     if (!editLocation.trim()) return setError('Location cannot be empty')
     try {
-      await axios.put(`${API_BASE}/searches/${id}/`, { location: editLocation })
+      await axios.put(`${API_BASE}/searches/${id}/`, { location: editLocation }, apiConfig())
       setEditingId(null)
       fetchHistory()
     } catch (e) { setError('Failed to update') }
@@ -125,19 +159,25 @@ export default function App() {
 
   const exportData = async (fmt) => {
     try {
-      const res = await axios.get(`${API_BASE}/export/?format=${fmt}`, { responseType: 'blob' })
+      const res = await axios.get(
+        `${API_BASE}/export/?format=${fmt}`,
+        { ...apiConfig(), responseType: 'blob' }
+      )
       const url = URL.createObjectURL(res.data)
       const a = document.createElement('a')
       a.href = url
       a.download = `weather-data.${fmt}`
       a.click()
       URL.revokeObjectURL(url)
-    } catch (e) { setError('Export failed. No data to export yet.') }
+    } catch (e) { setError('Export failed') }
   }
 
   const dailyForecast = forecast
     .filter(item => item.dt_txt?.includes('12:00:00'))
     .slice(0, 5)
+
+  // Show login page if not authenticated
+  if (!user) return <Login onLogin={handleLogin} />
 
   return (
     <div className="app">
@@ -153,7 +193,16 @@ export default function App() {
             <h1 className="logo">Aurora Weather</h1>
             <p className="logo-sub">by Kammari Ashritha · PM Accelerator</p>
           </div>
-          <div className="pma-badge">Built for<br /><strong>PM Accelerator</strong></div>
+          <div className="user-info">
+            {user.picture && (
+              <img src={user.picture} alt={user.name} className="user-avatar" />
+            )}
+            <div className="user-details">
+              <span className="user-name">{user.name}</span>
+              <span className="user-email">{user.email}</span>
+            </div>
+            <button onClick={handleLogout} className="logout-btn">Sign Out</button>
+          </div>
         </div>
       </header>
 
@@ -195,9 +244,7 @@ export default function App() {
                   <div className="weather-temp">{Math.round(weather.main?.temp)}°C</div>
                   <div className="weather-city">{weather.name}, {weather.sys?.country}</div>
                   <div className="weather-desc">{weather.weather?.[0]?.description}</div>
-                  <div className="weather-range">
-                    H: {Math.round(weather.main?.temp_max)}° / L: {Math.round(weather.main?.temp_min)}°
-                  </div>
+                  <div className="weather-range">H: {Math.round(weather.main?.temp_max)}° / L: {Math.round(weather.main?.temp_min)}°</div>
                 </div>
                 <div className="weather-details">
                   {[
@@ -239,12 +286,8 @@ export default function App() {
             <div className="forecast-grid">
               {dailyForecast.map((day, i) => (
                 <div key={i} className="forecast-card">
-                  <div className="forecast-day">
-                    {new Date(day.dt_txt).toLocaleDateString('en',{weekday:'long'})}
-                  </div>
-                  <div className="forecast-date">
-                    {new Date(day.dt_txt).toLocaleDateString('en',{month:'short',day:'numeric'})}
-                  </div>
+                  <div className="forecast-day">{new Date(day.dt_txt).toLocaleDateString('en',{weekday:'long'})}</div>
+                  <div className="forecast-date">{new Date(day.dt_txt).toLocaleDateString('en',{month:'short',day:'numeric'})}</div>
                   <div className="forecast-emoji">{getWeatherEmoji(day.weather?.[0]?.main)}</div>
                   <div className="forecast-temp">{Math.round(day.main?.temp)}°C</div>
                   <div className="forecast-desc">{day.weather?.[0]?.description}</div>
@@ -259,10 +302,10 @@ export default function App() {
           </section>
         )}
 
-        {/* SEARCH HISTORY — CRUD */}
+        {/* SAVED SEARCHES - CRUD */}
         <section className="history-section">
           <div className="section-header">
-            <h2 className="section-title">🗂️ Saved Searches</h2>
+            <h2 className="section-title">🗂️ Your Saved Searches</h2>
             <div className="export-row">
               <span>Export:</span>
               <button onClick={() => exportData('json')} className="export-btn">JSON</button>
@@ -273,20 +316,15 @@ export default function App() {
           {history.length === 0 ? (
             <div className="empty-state">
               <p>No saved searches yet.</p>
-              <p>Search for a city above, then save it with a date range.</p>
+              <p>Search for a city above and save it with a date range.</p>
             </div>
           ) : (
             <div className="table-wrap">
               <table className="history-table">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Location</th>
-                    <th>Date Range</th>
-                    <th>Temp</th>
-                    <th>Condition</th>
-                    <th>Saved On</th>
-                    <th>Actions</th>
+                    <th>#</th><th>Location</th><th>Date Range</th>
+                    <th>Temp</th><th>Condition</th><th>Saved On</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -294,9 +332,9 @@ export default function App() {
                     <tr key={item._id}>
                       <td>{idx + 1}</td>
                       <td>
-                        {editingId === item._id ? (
-                          <input value={editLocation} onChange={e => setEditLocation(e.target.value)} className="edit-input" />
-                        ) : item.location}
+                        {editingId === item._id
+                          ? <input value={editLocation} onChange={e => setEditLocation(e.target.value)} className="edit-input" />
+                          : item.location}
                       </td>
                       <td>{item.date_range_start} → {item.date_range_end}</td>
                       <td>{item.weather_data?.main?.temp ? `${Math.round(item.weather_data.main.temp)}°C` : '—'}</td>
@@ -323,22 +361,11 @@ export default function App() {
           )}
         </section>
 
-        {/* PM ACCELERATOR DESCRIPTION */}
+        {/* PM ACCELERATOR */}
         <section className="pma-section">
           <div className="pma-card">
             <h3>About PM Accelerator</h3>
-            <p>
-              The Product Manager Accelerator Program is designed to support PM professionals through every 
-              stage of their careers. From students looking for entry-level jobs to Directors looking to take 
-              on a leadership role, our program has helped over hundreds of students fulfill their career 
-              aspirations.
-            </p>
-            <p style={{marginTop:'12px'}}>
-              Our PM Accelerator community are ambitious and committed. Through our program they have learnt, 
-              honed and developed new PM and leadership skills, giving them a strong foundation for their 
-              future endeavors. Programs include: PMA Pro (FAANG-level PM skills), AI PM Bootcamp 
-              (hands-on AI product building), PMA Power Skills, and PMA Leader for executives.
-            </p>
+            <p>The Product Manager Accelerator Program is designed to support PM professionals through every stage of their careers. From students looking for entry-level jobs to Directors looking to take on a leadership role, our program has helped over hundreds of students fulfill their career aspirations. Our PM Accelerator community are ambitious and committed — learning, honing and developing new PM and leadership skills. Programs include PMA Pro (FAANG-level PM skills), AI PM Bootcamp (hands-on AI product building with real engineers), PMA Power Skills, and PMA Leader for executives.</p>
             <div className="pma-links">
               <a href="https://www.pmaccelerator.io/" target="_blank" rel="noreferrer" className="pma-link">🌐 Website</a>
               <a href="https://www.linkedin.com/school/pmaccelerator/" target="_blank" rel="noreferrer" className="pma-link">LinkedIn →</a>
