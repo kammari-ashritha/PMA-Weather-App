@@ -31,13 +31,16 @@ Ensure you have the following installed on your machine:
 ### 1. Clone the Repository
 \`\`\`bash
 git clone https://github.com/kammari-ashritha/PMA-Weather-App.git
+
 cd PMA-Weather-App
 \`\`\`
 
 ### 2. Backend Setup
 Open a terminal in the `backend` folder:
+
 \`\`\`bash
 cd backend
+
 python -m venv venv
 
 # On Windows:
@@ -46,26 +49,41 @@ venv\Scripts\activate
 source venv/bin/activate
 
 pip install -r requirements.txt
+
 \`\`\`
 Create a `.env` file in the backend directory and add your OpenWeatherMap API key:
+
 \`\`\`env
+
 OPENWEATHER_API_KEY=your_api_key_here
+
 GOOGLE_CLIENT_ID=your_client_id_here
+
 MONGODB_URI=mongodb://localhost:27017/
+
 MONGODB_DB=weather_app
+
 DJANGO_SECRET_KEY=aurora-weather-secret-key-2026-pma
+
 DEBUG=True
 \`\`\`
+
 Run the backend server:
+
 \`\`\`bash
+
 python manage.py runserver
 \`\`\`
 
 ### 3. Frontend Setup
 Open a second terminal in the `frontend` folder:
+
 \`\`\`bash
+
 cd frontend
+
 npm install
+
 npm run dev
 \`\`\`
 
