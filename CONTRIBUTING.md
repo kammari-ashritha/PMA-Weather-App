@@ -26,25 +26,33 @@ To contribute code, please follow this standard pull request workflow:
 Always create a new branch for your work. Do not commit directly to the main branch.
 
 Bash
+
 git checkout -b feature/your-feature-name
 # or
 git checkout -b fix/your-bugfix-name
+
 3. Make Changes & Commit
+
 Write clear, concise commit messages.
 
 Bash
 git add .
+
 git commit -m "Add short, descriptive commit message explaining your change"
+
 4. Push and Open a Pull Request (PR)
+
 Push your branch to your forked repository:
 
 Bash
 git push origin feature/your-feature-name
+
 Go to the original PMA-Weather-App repository and click Compare & pull request.
 
 In the PR description, clearly outline what changes you made and link any relevant issues (e.g., "Fixes #12").
 
  Coding Standards
+ 
 Frontend: Follow standard React hook practices. Ensure any new UI components are responsive.
 
 Backend: Follow standard Django conventions. Keep view logic clean and maintain appropriate REST API structures.
